@@ -1,5 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Azure.Storage;
+using Microsoft.Azure.Storage.Blob;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -7,6 +10,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using UploadFile.API.Services;
 
 namespace UploadFile.API.Controllers
 {
@@ -39,7 +43,7 @@ namespace UploadFile.API.Controllers
         [Route("api/submit")]
         [AllowAnonymous]
         [HttpPost]
-        public ActionResult Submit([FromForm]CallDetails callDetails)
+        public async Task<ActionResult> Submit([FromForm]CallDetails callDetails)
         {
 
             //if (!Configuration["SecrectKey"].Equals(callDetails.key))
@@ -54,6 +58,10 @@ namespace UploadFile.API.Controllers
                 {
                     recording.CopyTo(fileStream);
                 }
+                outResponse.url = await u(recording);
+                callDetails.FileName = outResponse.url;
+                DBService svc = new DBService();
+                svc.UploadRecordingDBSave(callDetails);
                 outResponse.Success = true;
                 outResponse.Message = "File Uploaded Successfully";
 
@@ -63,6 +71,28 @@ namespace UploadFile.API.Controllers
            
 
             return Ok(outResponse);
+        }
+        [Route("api/prvate")]
+        public async  Task<string> u(IFormFile file)
+        {
+            var storageConnectionString = Configuration["ConnectionStrings:AzureStorageConnectionString"];
+
+            if (CloudStorageAccount.TryParse(storageConnectionString, out CloudStorageAccount storageAccount))
+            {
+                CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+
+                CloudBlobContainer container = blobClient.GetContainerReference("recordings");
+
+                await container.CreateIfNotExistsAsync();
+
+                //MS: Don't rely on or trust the FileName property without validation. The FileName property should only be used for display purposes.
+                var picBlob = container.GetBlockBlobReference(Guid.NewGuid().ToString()+ Path.GetExtension(file.FileName));
+
+                await picBlob.UploadFromStreamAsync(file.OpenReadStream());
+
+                return picBlob.Uri.ToString();
+            }
+            return "";
         }
     }
 }
